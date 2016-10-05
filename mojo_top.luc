@@ -1,0 +1,133 @@
+module mojo_top (
+    input clk,              // 50MHz clock
+    input rst_n,            // reset button (active low)
+    output led [8],         // 8 user controllable LEDs
+    input cclk,             // configuration clock, AVR ready when high
+    output spi_miso,        // AVR SPI MISO
+    input spi_ss,           // AVR SPI Slave Select
+    input spi_mosi,         // AVR SPI MOSI
+    input spi_sck,          // AVR SPI Clock
+    output spi_channel [4], // AVR general purpose pins (used by default to select ADC channel)
+    input avr_tx,           // AVR TX (FPGA RX)
+    output avr_rx,          // AVR RX (FPGA TX)
+    input avr_rx_busy,      // AVR RX buffer full
+    output io_led [3][8],   // LEDs on IO Shield
+    output io_seg [8],      // 7-segment LEDs on IO Shield
+    output io_sel [4],      // Digit select on IO Shield
+    input io_button [5],    // 5 buttons on IO Shield
+    input io_dip [3][8],     // DIP switches on IO Shield
+    output inputsToCircuit [3] // 3 outputs from the FPGA to supply voltage for the inputs of the circuit. The locations are at P51, P41, and P35.
+  ) {
+  
+  sig rst;                  // reset signal
+  
+  .clk(clk) {
+    // The reset conditioner is used to synchronize the reset signal to the FPGA
+    // clock. This ensures the entire FPGA comes out of reset at the same time.
+    reset_conditioner reset_cond;
+ 
+    .rst(rst) {
+      fsm state(.clk(clk), #INIT(TURNEDOFF)) = {TURNEDOFF,OOO, OOI, OIO, OII,IOO,IOI,IIO,III};
+      // Finite state machine declaration. The starting sate is TURNEDOFF whereby the FPGA is in idle state.
+      // The next 8 states are named corresponding to what the inputs are. The state is named in the format Carry-in, B, A. O is 0 while I is 1.
+      //So if the state is OOI, the inputs for the carry and B are 0 while the input for A is 1.
+      
+      timeChange changeState; // instantiate a copy of timeChange and named it changeState
+      }
+  }
+
+  always {
+    reset_cond.in = ~rst_n; // input raw inverted reset signal
+    rst = reset_cond.out;   // conditioned reset
+    
+    led = 8h00;             // turn LEDs off, used to reflect what is the current input to the circuit 
+    spi_miso = bz;          // not using SPI
+    spi_channel = bzzzz;    // not using flags
+    avr_rx = bz;            // not using serial port
+    
+    io_led = 3x{{8h00}};    // turn LEDs off
+    io_seg = 8hff;          // turn segments off
+    io_sel = 4hf;           // select no digits
+  
+    inputsToCircuit = c{0,0,0}; // no voltage applied to the 3 inputs
+  
+    case(state.q){
+      state.TURNEDOFF:
+        if (io_button[0] == 1) // io_button[0] is the button labelled 'up' on the IO Shield
+          state.d = state.OOO; // Change state to OOO if io_button[0] is pressed
+      state.OOO:
+        inputsToCircuit = c{0,0,0}; // no voltage applied to the 3 inputs
+        led = c{0,0,0,0,0,0,0,0}; // turn LEDs off
+        if (io_button[0] == 1) // io_button[0] is the button labelled 'up' on the IO Shield
+          state.d = state.TURNEDOFF; // Change state to TURNEDOFF if io_button[0] is pressed
+        if (changeState.currentCounter  == b11111111111111111111111111) 
+          state.d = state.OOI;
+          // Change state to OOI if changeState, currentCounter has a binary value of 11111111111111111111111111
+          // Since the clk has a frequency of 50MHz and b11111111111111111111111111 = d67108863,state changes at approximately 67108863/(50 x 10^6) = 1.3s
+          // If previous state is TURNEDOFF, depending on the value of changeState.currentCounter when the state changes to this state, the amount of time the state remains in this state varies
+      state.OOI:
+        inputsToCircuit = c{0,0,1}; // voltage applied to A
+        led = c{0,0,0,0,0,0,0,1}; // turn on the LED corresponding to A
+        if (io_button[0] == 1) // io_button[0] is the button labelled 'up' on the IO Shield
+          state.d = state.TURNEDOFF; // Change state to TURNEDOFF if io_button[0] is pressed   
+        if (changeState.currentCounter  == b11111111111111111111111111)
+          state.d = state.OIO; 
+          // Change state to OIO if changeState, currentCounter has a binary value of 11111111111111111111111111
+          // Since the clk has a frequency of 50MHz and b11111111111111111111111111 = d67108863,state changes at approximately 67108863/(50 x 10^6) = 1.3s
+      state.OIO:
+        inputsToCircuit = c{0,1,0}; // voltage applied to B
+        led = c{0,0,0,0,0,0,1,0}; // turn on the LED corresponding to B
+        if (io_button[0] == 1) // io_button[0] is the button labelled 'up' on the IO Shield
+          state.d = state.TURNEDOFF; // Change state to TURNEDOFF if io_button[0] is pressed  
+        if (changeState.currentCounter  == b11111111111111111111111111)
+          state.d = state.OII; 
+          // Change state to OII if changeState, currentCounter has a binary value of 11111111111111111111111111
+          // Since the clk has a frequency of 50MHz and b11111111111111111111111111 = d67108863,state changes at approximately 67108863/(50 x 10^6) = 1.3s
+      state.OII:
+        inputsToCircuit = c{0,1,1}; // voltage applied to A and B
+        led = c{0,0,0,0,0,0,1,1}; // turn on the LEDs corresponding to A and B
+        if (io_button[0] == 1) // io_button[0] is the button labelled 'up' on the IO Shield
+          state.d = state.TURNEDOFF; // Change state to TURNEDOFF if io_button[0] is pressed    
+        if (changeState.currentCounter  == b11111111111111111111111111)
+          state.d = state.IOO; 
+          // Change state to IOO if changeState, currentCounter has a binary value of 11111111111111111111111111
+          // Since the clk has a frequency of 50MHz and b11111111111111111111111111 = d67108863,state changes at approximately 67108863/(50 x 10^6) = 1.3s
+      state.IOO:
+        inputsToCircuit = c{1,0,0}; // voltage applied to Carry-in
+        led = c{0,0,0,0,0,1,0,0}; // turn on the LED corresponding to Carry-in
+        if (io_button[0] == 1) // io_button[0] is the button labelled 'up' on the IO Shield
+          state.d = state.TURNEDOFF; // Change state to TURNEDOFF if io_button[0] is pressed     
+        if (changeState.currentCounter  == b11111111111111111111111111) 
+          state.d = state.IOI; 
+          // Change state to IOI if changeState, currentCounter has a binary value of 11111111111111111111111111
+          // Since the clk has a frequency of 50MHz and b11111111111111111111111111 = d67108863,state changes at approximately 67108863/(50 x 10^6) = 1.3s
+      state.IOI:
+        inputsToCircuit = c{1,0,1}; // voltage applied to A and Carry-in
+        led = c{0,0,0,0,0,1,0,1}; // turn on the LEDs corresponding to A and Carry-in
+        if (io_button[0] == 1) // io_button[0] is the button labelled 'up' on the IO Shield
+          state.d = state.TURNEDOFF; // Change state to TURNEDOFF if io_button[0] is pressed   
+        if (changeState.currentCounter  == b11111111111111111111111111)
+          state.d = state.IIO; 
+          // Change state to IIO if changeState, currentCounter has a binary value of 11111111111111111111111111
+          // Since the clk has a frequency of 50MHz and b11111111111111111111111111 = d67108863,state changes at approximately 67108863/(50 x 10^6) = 1.3s
+      state.IIO:
+        inputsToCircuit = c{1,1,0}; // voltage applied to B and Carry-in
+        led = c{0,0,0,0,0,1,1,0}; // turn on the LEDs corresponding to B and Carry-in
+        if (io_button[0] == 1) // io_button[0] is the button labelled 'up' on the IO Shield
+          state.d = state.TURNEDOFF; // Change state to TURNEDOFF if io_button[0] is pressed
+        if (changeState.currentCounter  == b11111111111111111111111111)
+          state.d = state.III; 
+          // Change state to III if changeState, currentCounter has a binary value of 11111111111111111111111111
+          // Since the clk has a frequency of 50MHz and b11111111111111111111111111 = d67108863,state changes at approximately 67108863/(50 x 10^6) = 1.3s
+      state.III:
+        inputsToCircuit = c{1,1,1}; // voltage applied to A, B and Carry-in
+        led = c{0,0,0,0,0,1,1,1}; // turn on the LEDs corresponding to A, B and Carry-in
+        if (io_button[0] == 1) // io_button[0] is the button labelled 'up' on the IO Shield
+          state.d = state.TURNEDOFF; // Change state to TURNEDOFF if io_button[0] is pressed
+        if (changeState.currentCounter  == b11111111111111111111111111)
+          state.d = state.OOO; 
+          // Change state to OOO if changeState, currentCounter has a binary value of 11111111111111111111111111
+          // Since the clk has a frequency of 50MHz and b11111111111111111111111111 = d67108863,state changes at approximately 67108863/(50 x 10^6) = 1.3s
+          }
+  }
+}
